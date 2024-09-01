@@ -1,70 +1,111 @@
 extern crate nannou;
 use nannou::{color::encoding, prelude::*};
 
+type Slices = Vec<(String, rgb::Rgb<encoding::Srgb, u8>)>;
+
 fn main() {
-    nannou::app(model).update(update).simple_window(view).run();
+    nannou::app(model).update(update).run();
+}
+
+enum ClickState {
+    Clicked(Vec2),
+    Released,
 }
 
 struct Model {
+    rotation: f32,
     start_time: f32,
-    angle: f32,
+    angle_stopped: f32,
     running: bool,
+    click_state: ClickState,
+    slices: Slices,
+    momentum: f32,
+}
+impl Model {
+    fn stop(&mut self) {
+        self.angle_stopped = self.rotation;
+        self.running = false;
+    }
+
+    fn start(&mut self, app: &App) {
+        self.start_time = app.time;
+        self.running = true;
+    }
 }
 
 fn model(app: &App) -> Model {
     app.new_window()
         .size(720, 720)
+        .view(view)
         .mouse_pressed(mouse_pressed)
+        .mouse_released(mouse_released)
         .build()
         .unwrap();
     Model {
         start_time: 0.0,
-        angle: 0.0,
-        running: true,
+        rotation: 0.0,
+        angle_stopped: 0.0,
+        running: false,
+        click_state: ClickState::Released,
+        momentum: 0.0,
+
+        slices: vec![
+            ("foo".to_owned(), STEELBLUE),
+            ("bar".to_owned(), RED),
+            ("foo".to_owned(), STEELBLUE),
+            ("baz".to_owned(), GREEN),
+            ("bar".to_owned(), RED),
+        ],
+    }
+}
+
+fn mouse_released(app: &App, model: &mut Model, _button: MouseButton) {
+    match model.click_state {
+        ClickState::Clicked(pos) => {
+            model.momentum = pos.distance(app.mouse.position());
+            model.click_state = ClickState::Released;
+            model.start(app);
+        }
+        ClickState::Released => {}
     }
 }
 
 fn mouse_pressed(app: &App, model: &mut Model, _button: MouseButton) {
-    if model.running {
-        model.angle = get_current_angle(app, model);
-        model.running = false;
-    } else {
-        model.start_time = app.time;
-        model.running = true;
+    match model.click_state {
+        ClickState::Clicked(_) => {}
+        ClickState::Released => {
+            model.click_state = ClickState::Clicked(app.mouse.position());
+            model.stop();
+        }
     }
 }
 
-fn update(_app: &App, _model: &mut Model, _update: Update) {}
+fn update(app: &App, model: &mut Model, _update: Update) {
+    model.rotation = current_angle(app, model);
+}
 
 fn view(app: &App, model: &Model, frame: Frame) {
-    let rotation = get_current_angle(app, model);
     let draw = app.draw();
 
-    let mut draw = draw.rotate(rotation);
     draw.background().color(BLACK);
-    draw_wheel(&mut draw);
+    draw.text("TODO: display the winning option here")
+        .color(RED)
+        .x_y(0.0, 350.0);
+    let mut draw = draw.rotate(model.rotation);
+    draw_wheel(&mut draw, &model.slices);
     draw.to_frame(app, &frame)
         .expect("To be able to draw to frame");
 }
 
-fn draw_wheel(draw: &mut Draw) {
-    let slices: Vec<(&str, rgb::Rgb<encoding::Srgb, u8>)> = vec![
-        ("foo", STEELBLUE),
-        ("bar", RED),
-        ("baz", GREEN),
-        ("foo", STEELBLUE),
-        ("bar", RED),
-        ("bar", RED),
-        ("baz", GREEN),
-        ("foo", STEELBLUE),
-        ("bar", RED),
-        ("baz", GREEN),
-    ];
-
+fn draw_wheel(draw: &mut Draw, slices: &Slices) {
     for (i, slice) in slices.iter().enumerate() {
-        let slice_width = 360 / slices.len();
+        let slice_width = 360 / slices.len() + (360 % slices.len()) / slices.len();
         let start_deg = i * slice_width;
-        let end_deg = start_deg + slice_width;
+        let end_deg = if i == slices.len() - 1 {
+            360
+        } else {
+            start_deg + slice_width
+        };
         let radius = 300.0;
 
         let (text, color) = slice;
@@ -87,16 +128,22 @@ fn middle_between(a: usize, b: usize) -> f32 {
     let b = b as f32;
     a + ((b - a) / 2.0)
 }
-fn get_current_angle(app: &App, model: &Model) -> f32 {
+fn current_angle(app: &App, model: &mut Model) -> f32 {
     if model.running {
-        decelerate(app.time - model.start_time)
+        let speed = decelerate(app.time - model.start_time, model.momentum);
+        if speed < 1.5 {
+            model.stop();
+            model.angle_stopped
+        } else {
+            speed
+        }
     } else {
-        model.angle
+        model.angle_stopped
     }
 }
 
-fn decelerate(time: f32) -> f32 {
-    (1.0 / time) * 10.0
+fn decelerate(time: f32, momentum: f32) -> f32 {
+    momentum / (time * 3.0)
 }
 
 fn make_cake_slice(from_deg: usize, to_deg: usize, radius: f32) -> Vec<Vec2> {
