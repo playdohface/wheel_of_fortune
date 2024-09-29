@@ -1,8 +1,12 @@
 extern crate nannou;
 use nannou::{color::encoding, prelude::*};
 
-type Slices = Vec<(String, rgb::Rgb<encoding::Srgb, u8>)>;
-
+struct Slices(Vec<(String, rgb::Rgb<encoding::Srgb, u8>)>);
+impl Slices {
+    fn slice_width(&self) -> usize {
+        360 / self.0.len() + (360 % self.0.len()) / self.0.len()
+    }
+}
 fn main() {
     nannou::app(model).update(update).run();
 }
@@ -31,6 +35,11 @@ impl Model {
         self.start_time = app.time;
         self.running = true;
     }
+
+    fn current_winner_slice(&self) -> (String, rgb::Rgb<encoding::Srgb, u8>) {
+        let rot = rad_to_deg(self.rotation) % 360.0;
+        self.slices.0[rot.trunc() as usize / self.slices.slice_width()].clone()
+    }
 }
 
 fn model(app: &App) -> Model {
@@ -49,20 +58,20 @@ fn model(app: &App) -> Model {
         click_state: ClickState::Released,
         momentum: 0.0,
 
-        slices: vec![
+        slices: Slices(vec![
             ("foo".to_owned(), STEELBLUE),
             ("bar".to_owned(), RED),
             ("foo".to_owned(), STEELBLUE),
             ("baz".to_owned(), GREEN),
             ("bar".to_owned(), RED),
-        ],
+        ]),
     }
 }
 
 fn mouse_released(app: &App, model: &mut Model, _button: MouseButton) {
     match model.click_state {
         ClickState::Clicked(pos) => {
-            model.momentum = pos.distance(app.mouse.position());
+            model.momentum = pos.distance(app.mouse.position()) / 5.0;
             model.click_state = ClickState::Released;
             model.start(app);
         }
@@ -81,16 +90,31 @@ fn mouse_pressed(app: &App, model: &mut Model, _button: MouseButton) {
 }
 
 fn update(app: &App, model: &mut Model, _update: Update) {
-    model.rotation = current_angle(app, model);
+    model.rotation = if model.running {
+        let speed = decelerate(app.time - model.start_time, model.momentum) / 100.0;
+        let current_angle = model.rotation + speed;
+        if speed < 0.001 {
+            model.stop();
+            model.angle_stopped
+        } else {
+            current_angle
+        }
+    } else {
+        model.angle_stopped
+    };
+}
+
+fn decelerate(time: f32, momentum: f32) -> f32 {
+    momentum - time
 }
 
 fn view(app: &App, model: &Model, frame: Frame) {
     let draw = app.draw();
 
     draw.background().color(BLACK);
-    draw.text("TODO: display the winning option here")
-        .color(RED)
-        .x_y(0.0, 350.0);
+    let (winner, winner_color) = model.current_winner_slice();
+    let text = format!("Winner: {winner}");
+    draw.text(&text).color(winner_color).x_y(0.0, 350.0);
     let mut draw = draw.rotate(model.rotation);
     draw_wheel(&mut draw, &model.slices);
     draw.to_frame(app, &frame)
@@ -98,10 +122,10 @@ fn view(app: &App, model: &Model, frame: Frame) {
 }
 
 fn draw_wheel(draw: &mut Draw, slices: &Slices) {
-    for (i, slice) in slices.iter().enumerate() {
-        let slice_width = 360 / slices.len() + (360 % slices.len()) / slices.len();
+    let slice_width = slices.slice_width();
+    for (i, slice) in slices.0.iter().enumerate() {
         let start_deg = i * slice_width;
-        let end_deg = if i == slices.len() - 1 {
+        let end_deg = if i == slices.0.len() - 1 {
             360
         } else {
             start_deg + slice_width
@@ -127,23 +151,6 @@ fn middle_between(a: usize, b: usize) -> f32 {
     let a = a as f32;
     let b = b as f32;
     a + ((b - a) / 2.0)
-}
-fn current_angle(app: &App, model: &mut Model) -> f32 {
-    if model.running {
-        let speed = decelerate(app.time - model.start_time, model.momentum);
-        if speed < 1.5 {
-            model.stop();
-            model.angle_stopped
-        } else {
-            speed
-        }
-    } else {
-        model.angle_stopped
-    }
-}
-
-fn decelerate(time: f32, momentum: f32) -> f32 {
-    momentum / (time * 3.0)
 }
 
 fn make_cake_slice(from_deg: usize, to_deg: usize, radius: f32) -> Vec<Vec2> {
